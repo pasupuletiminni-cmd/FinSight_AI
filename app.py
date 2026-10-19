@@ -35,6 +35,8 @@ import multi_agent_orchestrator
 import report_agent
 import chat_interface
 import extraction_agent
+import session_manager
+import pdf_report_generator
 from config import DATA_DIR, DOCUMENTS_DIR, CHUNKS_DIR, EMBEDDINGS_DIR, VECTORDB_DIR
 
 # -----------------------------------------------------------------------------
@@ -301,11 +303,19 @@ def get_indexed_companies_and_years(catalog):
     return {c: sorted(list(ys)) for c, ys in sorted(data.items())}
 
 
+if "active_session_id" not in st.session_state:
+    def_session = session_manager.initialize_default_sessions_if_empty()
+    st.session_state.active_session_id = def_session.get("session_id")
+
 if "chat_session" not in st.session_state:
     st.session_state.chat_session = chat_interface.create_session()
+    curr_s = session_manager.load_session(st.session_state.active_session_id)
+    if curr_s and curr_s.get("chat_history"):
+        st.session_state.chat_session.history = list(curr_s["chat_history"])
 
 if "current_page" not in st.session_state:
     st.session_state.current_page = "Executive Overview"
+
 
 
 # -----------------------------------------------------------------------------
@@ -422,35 +432,49 @@ st.markdown(f"""
 # Sidebar Navigation & System Telemetry
 # -----------------------------------------------------------------------------
 with st.sidebar:
-    st.markdown("### **Navigation**")
+    st.markdown("### **Research Workspace & Nav**")
+
+    # Research Session Status & Quick Switch
+    all_sessions = session_manager.list_sessions()
+    session_map = {s["session_id"]: s["name"] for s in all_sessions}
+    active_s_id = st.session_state.get("active_session_id")
+    if active_s_id not in session_map and all_sessions:
+        active_s_id = all_sessions[0]["session_id"]
+        st.session_state.active_session_id = active_s_id
+
+    current_idx = list(session_map.keys()).index(active_s_id) if active_s_id in session_map else 0
+    selected_session_id = st.selectbox(
+        "Active Session:",
+        options=list(session_map.keys()),
+        format_func=lambda sid: f"📁 {session_map.get(sid, sid)}",
+        index=current_idx if session_map else 0,
+        key="sidebar_session_select"
+    )
+
+    if selected_session_id != st.session_state.get("active_session_id"):
+        st.session_state.active_session_id = selected_session_id
+        session_obj = session_manager.load_session(selected_session_id)
+        if session_obj:
+            st.session_state.chat_session.history = list(session_obj.get("chat_history", []))
+        st.rerun()
+
+    nav_options = [
+        "Executive Overview",
+        "Research Workspace",
+        "Upload Report",
+        "Research Copilot",
+        "Company Analysis",
+        "Company Comparison",
+        "Visual Analytics",
+        "Report Copilot",
+    ]
+    cur_page = st.session_state.get("current_page", "Executive Overview")
+    page_idx = nav_options.index(cur_page) if cur_page in nav_options else 0
+
     nav_selection = st.radio(
         "Select Module:",
-        options=[
-            "Executive Overview",
-            "Upload Report",
-            "Research Copilot",
-            "Company Analysis",
-            "Company Comparison",
-            "Visual Analytics",
-            "Report Copilot",
-        ],
-        index=[
-            "Executive Overview",
-            "Upload Report",
-            "Research Copilot",
-            "Company Analysis",
-            "Company Comparison",
-            "Visual Analytics",
-            "Report Copilot",
-        ].index(st.session_state.current_page) if st.session_state.current_page in [
-            "Executive Overview",
-            "Upload Report",
-            "Research Copilot",
-            "Company Analysis",
-            "Company Comparison",
-            "Visual Analytics",
-            "Report Copilot",
-        ] else 0,
+        options=nav_options,
+        index=page_idx,
         label_visibility="collapsed"
     )
     st.session_state.current_page = nav_selection
@@ -472,8 +496,14 @@ with st.sidebar:
     st.markdown("---")
     if st.button("🧹 Clear Chat History", use_container_width=True):
         st.session_state.chat_session.reset()
-        st.success("Session state cleared.")
+        if st.session_state.get("active_session_id"):
+            cur_s = session_manager.load_session(st.session_state.active_session_id)
+            if cur_s:
+                cur_s["chat_history"] = []
+                session_manager.save_session(cur_s)
+        st.success("Session conversation history cleared.")
         st.rerun()
+
 
 
 # =============================================================================
@@ -603,6 +633,191 @@ if st.session_state.current_page == "Executive Overview":
 
 
 # =============================================================================
+# VIEW: RESEARCH WORKSPACE & SESSION MANAGEMENT
+# =============================================================================
+elif st.session_state.current_page == "Research Workspace":
+    st.markdown("### 💼 Research Workspace & Session Management")
+    st.markdown(
+        "Organize multi-agent financial investigations into named research sessions. "
+        "Each session preserves custom analyst hypotheses, conversational research history, target entities, and document access."
+    )
+
+    all_sessions = session_manager.list_sessions()
+    active_s_id = st.session_state.get("active_session_id")
+    active_session = session_manager.load_session(active_s_id) if active_s_id else None
+
+    # Top KPI cards for Workspace
+    w_col1, w_col2, w_col3, w_col4 = st.columns(4)
+    with w_col1:
+        st.markdown(f"""
+        <div class="fin-card">
+            <div class="fin-card-title">Active Research Session</div>
+            <div class="fin-card-value" style="font-size:18px; color:var(--emerald-primary);">{active_session['name'] if active_session else 'Default'}</div>
+            <div style="font-size:11px; color:#5E6963;">ID: {active_s_id or '—'}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with w_col2:
+        st.markdown(f"""
+        <div class="fin-card">
+            <div class="fin-card-title">Total Saved Sessions</div>
+            <div class="fin-card-value">{len(all_sessions)}</div>
+            <div style="font-size:11px; color:#5E6963;">Persistent workspaces on disk</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with w_col3:
+        st.markdown(f"""
+        <div class="fin-card">
+            <div class="fin-card-title">Session Messages</div>
+            <div class="fin-card-value">{len(active_session.get('chat_history', [])) if active_session else 0}</div>
+            <div style="font-size:11px; color:#5E6963;">Research turns recorded</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with w_col4:
+        st.markdown(f"""
+        <div class="fin-card">
+            <div class="fin-card-title">Indexed Report Catalog</div>
+            <div class="fin-card-value">{total_chunks:,}</div>
+            <div style="font-size:11px; color:#107C41;">{len(company_coverage)} Verified Companies</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # Tabs: Sessions, Working Notes, Document Inventory, Export
+    tab_session, tab_notes, tab_docs, tab_export = st.tabs([
+        "📁 Research Sessions",
+        "📝 Analyst Notes & Hypothesis",
+        "📑 Document Inventory & Ingestion",
+        "📤 Session Export & Dossier"
+    ])
+
+    with tab_session:
+        s_left, s_right = st.columns([1.5, 1])
+
+        with s_left:
+            st.markdown("#### **Active Session Management**")
+            if active_session:
+                st.markdown(f"**Session Name:** `{active_session.get('name')}`")
+                st.markdown(f"**Description:** {active_session.get('description') or 'No description provided.'}")
+                st.markdown(f"**Created:** {active_session.get('created_at')} &nbsp;|&nbsp; **Last Updated:** {active_session.get('updated_at')}")
+                pinned = active_session.get("pinned_companies", [])
+                if pinned:
+                    st.markdown(f"**Pinned Coverage:** {', '.join(pinned)}")
+
+                st.markdown("<br>", unsafe_allow_html=True)
+                # Quick Session Actions
+                act_c1, act_c2 = st.columns(2)
+                with act_c1:
+                    if st.button("💬 Open Research Copilot for this Session", use_container_width=True, type="primary"):
+                        st.session_state.current_page = "Research Copilot"
+                        st.rerun()
+                with act_c2:
+                    if st.button("🗑️ Delete This Session", use_container_width=True):
+                        session_manager.delete_session(active_s_id)
+                        remaining = session_manager.list_sessions()
+                        if remaining:
+                            st.session_state.active_session_id = remaining[0]["session_id"]
+                        else:
+                            st.session_state.active_session_id = session_manager.initialize_default_sessions_if_empty()["session_id"]
+                        st.success("Session deleted.")
+                        st.rerun()
+
+            st.markdown("---")
+            st.markdown("#### **All Research Workspaces**")
+            session_table_data = []
+            for s in all_sessions:
+                session_table_data.append({
+                    "Session Name": s.get("name"),
+                    "Description": s.get("description", ""),
+                    "Updated": s.get("updated_at", ""),
+                    "Session ID": s.get("session_id"),
+                })
+            st.dataframe(pd.DataFrame(session_table_data), use_container_width=True, hide_index=True)
+
+        with s_right:
+            st.markdown("#### **➕ Create New Research Session**")
+            with st.form("new_session_form"):
+                new_name = st.text_input("Session Name:", placeholder="e.g., Tech Sector FY24 YoY Audit")
+                new_desc = st.text_area("Research Thesis / Scope:", placeholder="Analyze revenue growth, margins, and debt trajectories for peer comparison.")
+                new_pinned = st.multiselect(
+                    "Scope Companies:",
+                    options=list(company_coverage.keys()),
+                    default=list(company_coverage.keys())[:3] if len(company_coverage) >= 3 else list(company_coverage.keys())
+                )
+                create_submitted = st.form_submit_button("Create & Switch to Session", type="primary", use_container_width=True)
+
+                if create_submitted:
+                    if not new_name.strip():
+                        st.error("Please enter a session name.")
+                    else:
+                        new_s = session_manager.create_session(new_name, new_desc, new_pinned)
+                        st.session_state.active_session_id = new_s["session_id"]
+                        st.session_state.chat_session.history = []
+                        st.success(f"Session '{new_name}' created successfully!")
+                        st.rerun()
+
+    with tab_notes:
+        st.markdown("#### **Analyst Working Notes & Investigation Findings**")
+        st.markdown("Use this workspace scratchpad to record your financial thesis, observations, questions to ask the agents, or synthesis points.")
+
+        curr_notes = active_session.get("notes", "") if active_session else ""
+        updated_notes = st.text_area(
+            "Session Notes (auto-saved):",
+            value=curr_notes,
+            height=260,
+            placeholder="Document key findings, auditor comments, debt covenant warnings, or follow-up questions here..."
+        )
+
+        col_save_note, _ = st.columns([1, 3])
+        with col_save_note:
+            if st.button("💾 Save Analyst Notes", type="primary", use_container_width=True):
+                if active_session:
+                    active_session["notes"] = updated_notes
+                    session_manager.save_session(active_session)
+                    st.success("Analyst notes saved to session workspace.")
+                    st.rerun()
+
+    with tab_docs:
+        st.markdown("#### **Workspace Document Inventory & Vector Coverage**")
+        st.markdown("Every annual report chunked and indexed in the system is available for cross-agent multi-step reasoning.")
+
+        doc_rows = []
+        for (comp, yr), c_count in sorted(catalog.get("counts", {}).items()):
+            if comp and yr != "unknown":
+                doc_rows.append({
+                    "Enterprise": comp,
+                    "Fiscal Year": f"FY{yr}",
+                    "Vector Chunks": c_count,
+                    "ChromaDB Status": "Indexed & Active",
+                    "Embedding Engine": "all-MiniLM-L6-v2 (384d)"
+                })
+
+        if doc_rows:
+            st.dataframe(pd.DataFrame(doc_rows), use_container_width=True, hide_index=True)
+        else:
+            st.info("No documents currently indexed.")
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("📤 Ingest New PDF Filing", use_container_width=False, type="primary"):
+            st.session_state.current_page = "Upload Report"
+            st.rerun()
+
+    with tab_export:
+        st.markdown("#### **Export Research Dossier**")
+        st.markdown("Export complete session findings, research Q&A conversation history, and working notes for institutional archiving.")
+
+        if active_session:
+            session_json_str = json.dumps(active_session, indent=2, ensure_ascii=False)
+            st.download_button(
+                "📥 Export Full Session Dossier (JSON)",
+                data=session_json_str,
+                file_name=f"FinSight_Session_{active_session.get('name', 'Export').replace(' ', '_')}.json",
+                mime="application/json",
+                use_container_width=True
+            )
+
+
+# =============================================================================
 # VIEW 2: UPLOAD REPORT & INGESTION PIPELINE
 # =============================================================================
 elif st.session_state.current_page == "Upload Report":
@@ -718,6 +933,11 @@ elif st.session_state.current_page == "Research Copilot":
     if prompt_to_execute:
         with st.spinner("Retrieving annual report evidence and synthesizing response..."):
             turn = st.session_state.chat_session.ask(prompt_to_execute)
+            if st.session_state.get("active_session_id"):
+                active_s = session_manager.load_session(st.session_state.active_session_id)
+                if active_s:
+                    active_s["chat_history"] = list(st.session_state.chat_session.history)
+                    session_manager.save_session(active_s)
         st.rerun()
 
 
@@ -1088,10 +1308,28 @@ elif st.session_state.current_page == "Report Copilot":
             st.markdown("<br>", unsafe_allow_html=True)
 
             # Download Buttons
-            d_col1, d_col2, _ = st.columns([1, 1, 2])
+            try:
+                pdf_bytes = pdf_report_generator.generate_pdf_report(report_obj)
+            except Exception as pdf_exc:
+                pdf_bytes = None
+                st.caption(f"Note: PDF generation encountered: {pdf_exc}")
+
+            d_col0, d_col1, d_col2 = st.columns([1.5, 1, 1])
+            with d_col0:
+                if pdf_bytes:
+                    st.download_button(
+                        "📄 Download Analyst PDF Briefing",
+                        data=pdf_bytes,
+                        file_name=f"FinSight_{rep_comp}_FY{rep_prior}_FY{rep_curr}_Briefing.pdf",
+                        mime="application/pdf",
+                        type="primary",
+                        use_container_width=True
+                    )
+                else:
+                    st.button("📄 PDF Unavailable", disabled=True, use_container_width=True)
             with d_col1:
                 st.download_button(
-                    "📥 Download Report (.md)",
+                    "📥 Download Markdown (.md)",
                     data=report_md,
                     file_name=f"FinSight_{rep_comp}_FY{rep_prior}_FY{rep_curr}_Report.md",
                     mime="text/markdown",
@@ -1099,7 +1337,7 @@ elif st.session_state.current_page == "Report Copilot":
                 )
             with d_col2:
                 st.download_button(
-                    "📄 Download Plain Text (.txt)",
+                    "📝 Download Plain Text (.txt)",
                     data=report_md,
                     file_name=f"FinSight_{rep_comp}_FY{rep_prior}_FY{rep_curr}_Report.txt",
                     mime="text/plain",

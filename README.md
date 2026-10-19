@@ -52,12 +52,18 @@
 - **Cross-Company Benchmarking**: Compares multi-enterprise performance side-by-side across common reporting periods.
 - **Strict Currency Safety**: Guards against improper cross-currency arithmetic (e.g., prohibits combining USD and INR into invalid ratios or false comparisons).
 
-### 5. 📈 Visual Analytics & Executive Reports
-- **Interactive Visualizations**: Dynamic Altair charts showcasing revenue trajectories, profit margins, and balance sheet compositions.
-- **Report Copilot**: One-click generation of institutional-grade executive briefings, complete with Executive Summaries, Key Financials tables (distinguishing Reported vs. Derived values), Risk Screenings, and full bibliographic citations.
+### 5. 💼 Research Workspace & Named Session Management
+- **Named Research Workspaces**: Create, save, switch, and export customized research sessions (e.g., *"Tech Giants FY24 Audit"* or *"Indian IT Peer Benchmarking"*).
+- **Persistent Investigation Notes**: Track working financial hypotheses and qualitative analyst observations alongside quantitative metrics.
+- **Dossier Archiving**: 1-click export of the complete research session notebook including multi-turn Q&A logs.
 
-### 6. 📥 Incremental PDF Ingestion
-- Upload new annual report PDFs via the UI with automatic text extraction (`pdfplumber`), semantic chunking with overlap (600 words / 100-word overlap), MiniLM dense vector generation, and incremental indexing into ChromaDB without resetting existing data.
+### 6. 📈 Visual Analytics & Executive PDF Reports
+- **Interactive Visualizations**: Dynamic Altair charts showcasing revenue trajectories, profit margins, and balance sheet compositions.
+- **Report Copilot with PDF Generation**: One-click compilation of publication-ready analyst PDF briefings (using ReportLab), complete with Executive Summaries, Audited Key Financials tables, Red Flag Risk Audits, Peer Comparisons, and methodology disclosures.
+
+### 7. 📥 Incremental PDF Ingestion & Document Manager
+- **Document Management**: Comprehensive catalog view of all verified filings, page counts, chunk distributions, and ChromaDB vector indexing status.
+- **Incremental Pipeline**: Upload new annual report PDFs via the UI with automatic text extraction (`pdfplumber`), semantic chunking with overlap (600 words / 100-word overlap), MiniLM dense vector generation, and incremental indexing into ChromaDB without resetting existing data.
 
 ---
 
@@ -69,12 +75,13 @@ flowchart TD
     
     subgraph UI_Modules [FinSight AI Interface Modules]
         UI --> M1[Executive Overview]
+        UI --> M0[Research Workspace & Sessions]
         UI --> M2[Upload Report Pipeline]
         UI --> M3[Research Copilot]
         UI --> M4[Company Analysis]
         UI --> M5[Company Comparison]
         UI --> M6[Visual Analytics]
-        UI --> M7[Report Copilot]
+        UI --> M7[Report Copilot & PDF Generator]
     end
 
     subgraph Core_Multi_Agent [Multi-Agent Core Engine]

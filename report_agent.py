@@ -447,6 +447,15 @@ def format_report_text(report):
     return format_report_markdown(report).replace("**", "").replace("## ", "").replace("# ", "")
 
 
+def generate_report_pdf(report, comparison_data=None, output_path=None):
+    """
+    Generate a publication-grade analyst-style PDF report from report object.
+    Uses reportlab via pdf_report_generator.
+    """
+    import pdf_report_generator
+    return pdf_report_generator.generate_pdf_report(report, comparison_data, output_path)
+
+
 if __name__ == "__main__":
     import sys
     company_name, previous, current = ("Apple", "2023", "2024") if len(sys.argv) != 4 else sys.argv[1:4]

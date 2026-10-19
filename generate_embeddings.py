@@ -110,6 +110,7 @@ def process_chunk_file(model, chunk_path):
 
     Returns (embedded_count, skipped_count, error_count) for this file.
     """
+    EMBEDDINGS_DIR.mkdir(parents=True, exist_ok=True)
     output_path = EMBEDDINGS_DIR / chunk_path.name.replace("_chunks.json", "_embeddings.json")
 
     try:
